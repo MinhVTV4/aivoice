@@ -285,12 +285,13 @@
             apiKey: "AIzaSyBA_dBZVyGwX2y_PIWOB60AB-OHBAPAzlo",
             authDomain: "aivoice-7e506.firebaseapp.com",
             projectId: "aivoice-7e506",
-            storageBucket: "aivoice-7e506.appspot.com", // Corrected domain
+            storageBucket: "aivoice-7e506.appspot.com",
             messagingSenderId: "1098820942481",
             appId: "1:1098820942481:web:c2f4bc50e13047ca2a5d30"
         };
         
         let model;
+        let chatSession; // NEW: To hold the conversation session
 
         // --- Main Initialization ---
         async function main() {
@@ -303,6 +304,12 @@
                 const ai = getAI(app, { backend: new GoogleAIBackend() });
                 model = getGenerativeModel(ai, { model: "gemini-1.5-flash-latest" });
                 console.log("Generative Model instance created!");
+
+                // NEW: Start a chat session to maintain context
+                chatSession = model.startChat({
+                    history: [], // Start with an empty history
+                });
+                console.log("Chat session started!");
 
                 // Enable UI and speech recognition
                 enableApp();
@@ -318,7 +325,6 @@
             recordButton.disabled = false;
             statusDisplay.textContent = 'Nhấn để nói';
             const initialMessage = "Xin chào! Nhấn nút micro bên dưới để bắt đầu cuộc trò chuyện.";
-            // Update initial message
             const firstAIMessage = chatLog.querySelector('.ai-message .text');
             if (firstAIMessage && firstAIMessage.textContent.includes('khởi tạo')) {
                 firstAIMessage.textContent = initialMessage;
@@ -429,10 +435,10 @@
             }
         }
         
-        // --- Real AI Logic ---
+        // --- Real AI Logic with Context ---
         async function callGeminiAPI(prompt) {
-            if (!model) {
-                addMessageToLog("Mô hình AI chưa sẵn sàng. Vui lòng thử lại sau.", 'ai');
+            if (!chatSession) {
+                addMessageToLog("Phiên trò chuyện chưa sẵn sàng. Vui lòng thử lại sau.", 'ai');
                 return;
             }
             
@@ -441,7 +447,8 @@
             const thinkingMessageId = addMessageToLog('', 'ai', true);
 
             try {
-                const result = await model.generateContent(prompt);
+                // MODIFIED: Use chatSession.sendMessage to send prompt with history
+                const result = await chatSession.sendMessage(prompt);
                 const response = result.response;
                 const text = response.text();
                 
