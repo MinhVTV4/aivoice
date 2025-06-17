@@ -50,7 +50,7 @@
         
         /* --- Header --- */
         .chat-header {
-            padding: 1rem;
+            padding: 0.75rem 1rem;
             background-color: var(--primary-color);
             color: white;
             text-align: center;
@@ -58,14 +58,22 @@
             font-weight: 600;
             flex-shrink: 0;
             display: flex;
-            justify-content: space-between;
-            align-items: center;
+            flex-direction: column;
+            gap: 0.5rem;
         }
         
-        .chat-header .title {
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+        }
+
+        .header-top .title {
             flex-grow: 1;
             text-align: center;
-            margin-left: 40px; /* Offset to center title correctly */
+            /* Adjust margin to keep it centered with the new button */
+            margin-left: 40px; 
         }
 
         .new-chat-button {
@@ -89,6 +97,17 @@
         .new-chat-button svg {
             width: 22px;
             height: 22px;
+        }
+
+        /* --- Voice Selection --- */
+        #voiceSelect {
+            background-color: var(--primary-hover);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            max-width: 90%;
         }
 
         /* --- Message Log --- */
@@ -276,11 +295,14 @@
                 border-radius: 12px;
                 box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
             }
-             .chat-header .title {
+             .header-top .title {
                 margin-left: 50px;
              }
              .new-chat-button {
                 width: 50px;
+             }
+             #voiceSelect {
+                font-size: 0.9rem;
              }
         }
     </style>
@@ -289,13 +311,16 @@
 
     <div class="chat-container">
         <div class="chat-header">
-            <div class="title">Trợ lý Giọng nói AI</div>
-            <button class="new-chat-button" id="newChatButton" title="Cuộc trò chuyện mới">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
-                    <path d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
-                    <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
-                </svg>
-            </button>
+            <div class="header-top">
+                <div class="title">Trợ lý Giọng nói AI</div>
+                <button class="new-chat-button" id="newChatButton" title="Cuộc trò chuyện mới">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
+                        <path d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
+                        <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
+                    </svg>
+                </button>
+            </div>
+            <select id="voiceSelect"></select>
         </div>
         
         <div class="chat-log" id="chatLog">
@@ -322,7 +347,8 @@
         const recordButton = document.getElementById('recordButton');
         const statusDisplay = document.getElementById('status');
         const chatLog = document.getElementById('chatLog');
-        const newChatButton = document.getElementById('newChatButton'); // New button
+        const newChatButton = document.getElementById('newChatButton');
+        const voiceSelect = document.getElementById('voiceSelect'); // Voice selector
 
         // --- Firebase Configuration ---
         const firebaseConfig = {
@@ -336,17 +362,24 @@
         
         let model;
         let chatSession;
+        let availableVoices = []; // To store available voices
 
         // --- Main Initialization ---
         async function main() {
             try {
+                populateVoiceList();
+                // The 'voiceschanged' event is fired when the list of voices is ready
+                if (speechSynthesis.onvoiceschanged !== undefined) {
+                    speechSynthesis.onvoiceschanged = populateVoiceList;
+                }
+
                 const app = initializeApp(firebaseConfig);
                 const ai = getAI(app, { backend: new GoogleAIBackend() });
                 model = getGenerativeModel(ai, { model: "gemini-1.5-flash-latest" });
                 
-                newChatButton.addEventListener('click', startNewConversation); // Add event listener
+                newChatButton.addEventListener('click', () => startNewConversation(false));
 
-                startNewConversation(true); // Start the first conversation automatically
+                startNewConversation(true);
 
             } catch(e) {
                 console.error("Initialization failed:", e);
@@ -359,17 +392,13 @@
         function startNewConversation(isInitialLoad = false) {
             if (!model) return;
 
-            // Reset chat session for a new context
             chatSession = model.startChat({ history: [] });
             console.log("New chat session started!");
-
-            // Clear the visual chat log
             chatLog.innerHTML = ''; 
 
             const initialMessage = "Xin chào! Bạn muốn hỏi tôi điều gì hôm nay?";
             addMessageToLog(initialMessage, 'ai');
             
-            // Only speak on first load, not every time user clicks "new chat"
             if (isInitialLoad) {
                  speak(initialMessage);
             }
@@ -390,42 +419,21 @@
             recognition.continuous = false;
             recognition.lang = 'vi-VN';
             recognition.interimResults = false;
-
             let isRecording = false;
 
             recordButton.addEventListener('click', () => {
                 if (isRecording) {
                     recognition.stop();
                 } else {
-                     // Stop any currently playing speech before starting to record
                     window.speechSynthesis.cancel();
                     recognition.start();
                 }
             });
 
-            recognition.onstart = () => {
-                isRecording = true;
-                recordButton.classList.add('recording');
-                statusDisplay.textContent = 'Đang lắng nghe...';
-            };
-
-            recognition.onend = () => {
-                isRecording = false;
-                recordButton.classList.remove('recording');
-                statusDisplay.textContent = 'Nhấn để nói';
-            };
-
-            recognition.onresult = (event) => {
-                const transcript = event.results[0][0].transcript;
-                addMessageToLog(transcript, 'user');
-                callGeminiAPI(transcript);
-            };
-
-            recognition.onerror = (event) => {
-                console.error('Speech recognition error:', event.error);
-                statusDisplay.textContent = `Lỗi: ${event.error}`;
-            };
-
+            recognition.onstart = () => { isRecording = true; recordButton.classList.add('recording'); statusDisplay.textContent = 'Đang lắng nghe...'; };
+            recognition.onend = () => { isRecording = false; recordButton.classList.remove('recording'); statusDisplay.textContent = 'Nhấn để nói'; };
+            recognition.onresult = (event) => { const transcript = event.results[0][0].transcript; addMessageToLog(transcript, 'user'); callGeminiAPI(transcript); };
+            recognition.onerror = (event) => { console.error('Speech recognition error:', event.error); statusDisplay.textContent = `Lỗi: ${event.error}`; };
         } else {
             recordButton.disabled = true;
             const errorMsg = 'Trình duyệt không hỗ trợ nhận diện giọng nói.';
@@ -471,11 +479,43 @@
              }
         }
 
-        // --- Text-to-Speech Function ---
+        // --- Text-to-Speech & Voice Selection Functions ---
+        function populateVoiceList() {
+            const voices = speechSynthesis.getVoices();
+            availableVoices = voices.filter(voice => voice.lang.startsWith('vi'));
+            
+            if (availableVoices.length === 0) {
+                voiceSelect.innerHTML = '<option value="">Không có giọng Tiếng Việt</option>';
+                return;
+            }
+            
+            voiceSelect.innerHTML = ''; // Clear previous options
+            availableVoices.forEach(voice => {
+                const option = document.createElement('option');
+                option.textContent = `${voice.name} (${voice.lang})`;
+                option.setAttribute('data-lang', voice.lang);
+                option.setAttribute('data-name', voice.name);
+                voiceSelect.appendChild(option);
+            });
+        }
+
         function speak(text) {
             if ('speechSynthesis' in window) {
                 const utterance = new SpeechSynthesisUtterance(text);
-                utterance.lang = 'vi-VN';
+                
+                // Get the selected voice name from the dropdown
+                const selectedOption = voiceSelect.selectedOptions[0];
+                if (selectedOption) {
+                    const selectedVoiceName = selectedOption.getAttribute('data-name');
+                    const voice = availableVoices.find(v => v.name === selectedVoiceName);
+                    if (voice) {
+                        utterance.voice = voice;
+                        utterance.lang = voice.lang;
+                    }
+                } else {
+                    utterance.lang = 'vi-VN'; // Fallback
+                }
+                
                 utterance.rate = 1.0;
                 window.speechSynthesis.cancel();
                 window.speechSynthesis.speak(utterance);
