@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Voice - Đăng nhập</title>
+    <style>
+        /* --- Cài đặt Mobile First --- */
+        :root {
+            --primary-color: #007bff;
+            --primary-hover: #0056b3;
+            --secondary-color: #6c757d;
+            --background-color: #f4f7f9;
+            --container-bg: #ffffff;
+            --text-color: #333;
+            --border-color: #dee2e6;
+            --error-color: #dc3545;
+            --success-color: #28a745;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            margin: 0;
+            background-color: var(--background-color);
+            color: var(--text-color);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 15px;
+            box-sizing: border-box;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* --- Container chính --- */
+        #app-container {
+            width: 100%;
+            max-width: 420px;
+            background-color: var(--container-bg);
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            overflow: hidden;
+            transition: all 0.3s ease-in-out;
+        }
+
+        /* --- Phần Xác thực (Login/Register) --- */
+        #auth-container {
+            padding: 30px 25px;
+        }
+
+        .auth-header {
+            text-align: center;
+            margin-bottom: 25px;
+        }
+
+        .auth-header h1 {
+            margin: 0;
+            font-size: 2rem;
+            color: var(--primary-color);
+        }
+
+        .auth-toggle {
+            display: flex;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .auth-toggle button {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            background-color: transparent;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .auth-toggle button.active {
+            background-color: var(--primary-color);
+            color: white;
+            box-shadow: 0 2px 5px rgba(0, 123, 255, 0.3);
+        }
+        .auth-toggle button:first-child.active { border-radius: 7px 0 0 7px; }
+        .auth-toggle button:last-child.active { border-radius: 0 7px 7px 0; }
+
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            font-size: 0.9rem;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            box-sizing: border-box;
+            font-size: 1rem;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.2);
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 14px;
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1.1rem;
+            font-weight: 600;
+            transition: background-color 0.3s;
+        }
+
+        .submit-btn:hover {
+            background-color: var(--primary-hover);
+        }
+
+        .divider {
+            text-align: center;
+            margin: 20px 0;
+            color: var(--secondary-color);
+            font-size: 0.9rem;
+            position: relative;
+        }
+        .divider::before, .divider::after {
+            content: '';
+            display: inline-block;
+            width: 40%;
+            height: 1px;
+            background-color: var(--border-color);
+            vertical-align: middle;
+            margin: 0 5px;
+        }
+
+        .google-btn {
+            width: 100%;
+            padding: 12px;
+            background-color: #fff;
+            color: #444;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            transition: all 0.3s;
+        }
+        .google-btn:hover { background-color: #f8f8f8; }
+        .google-btn img { width: 20px; height: 20px; }
+        
+        #auth-status {
+            margin-top: 15px;
+            text-align: center;
+            font-weight: 500;
+            color: var(--error-color);
+            min-height: 20px;
+        }
+
+        /* --- Giao diện ứng dụng chính (sau khi đăng nhập) --- */
+        #main-app {
+            display: flex;
+            flex-direction: column;
+            height: 85vh; /* Chiều cao cho mobile */
+        }
+
+        .app-header {
+            padding: 15px;
+            background-color: var(--primary-color);
+            color: white;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .app-header #user-info {
+            font-weight: 600;
+            font-size: 0.9rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        #sign-out-btn {
+            background: none;
+            border: 1px solid white;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        #sign-out-btn:hover { background-color: rgba(255,255,255,0.2); }
+
+        .chat-container {
+            flex-grow: 1;
+            padding: 15px;
+            overflow-y: auto;
+            background-color: var(--background-color);
+        }
+        
+        #response-container {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            padding: 10px;
+            background-color: var(--container-bg);
+            border-radius: 8px;
+            min-height: 50px;
+        }
+
+        .prompt-area {
+            padding: 15px;
+            border-top: 1px solid var(--border-color);
+            background-color: #e9ecef;
+            display: flex;
+            gap: 10px;
+        }
+        
+        #prompt-input {
+            flex-grow: 1;
+            padding: 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            resize: none;
+            font-size: 1rem;
+        }
+        
+        #send-prompt-btn {
+            padding: 0 20px;
+            border-radius: 20px;
+            border: none;
+            background-color: var(--primary-color);
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        #send-prompt-btn:hover { background-color: var(--primary-hover); }
+
+        /* --- Media Query cho màn hình lớn hơn --- */
+        @media (min-width: 768px) {
+            #app-container {
+                max-width: 480px; /* Tăng chiều rộng tối đa cho desktop */
+            }
+            #main-app {
+                height: 90vh;
+                max-height: 800px; /* Giới hạn chiều cao trên desktop */
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="app-container">
+
+        <div id="auth-container">
+            <div class="auth-header">
+                <h1>AI Voice</h1>
+                <p>Đăng nhập để tiếp tục</p>
+            </div>
+
+            <div class="auth-toggle">
+                <button id="show-login-btn" class="active">Đăng nhập</button>
+                <button id="show-register-btn">Đăng ký</button>
+            </div>
+
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="login-email">Email</label>
+                    <input type="email" id="login-email" required>
+                </div>
+                <div class="form-group">
+                    <label for="login-password">Mật khẩu</label>
+                    <input type="password" id="login-password" required>
+                </div>
+                <button type="submit" class="submit-btn">Đăng nhập</button>
+            </form>
+
+            <form id="register-form" class="hidden">
+                <div class="form-group">
+                    <label for="register-email">Email</label>
+                    <input type="email" id="register-email" required>
+                </div>
+                <div class="form-group">
+                    <label for="register-password">Mật khẩu (tối thiểu 6 ký tự)</label>
+                    <input type="password" id="register-password" required>
+                </div>
+                <button type="submit" class="submit-btn">Tạo tài khoản</button>
+            </form>
+
+            <p id="auth-status"></p>
+
+            <div class="divider">hoặc</div>
+
+            <button class="google-btn" id="google-signin-btn">
+                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google icon">
+                <span>Đăng nhập với Google</span>
+            </button>
+        </div>
+
+        <main id="main-app" class="hidden">
+            <header class="app-header">
+                <span id="user-info"></span>
+                <button id="sign-out-btn">Đăng xuất</button>
+            </header>
+            
+            <div class="chat-container">
+                <div id="response-container">Chào mừng bạn đến với AI Voice!</div>
+            </div>
+
+            <div class="prompt-area">
+                <textarea id="prompt-input" rows="1" placeholder="Nhập yêu cầu của bạn..."></textarea>
+                <button id="send-prompt-btn">Gửi</button>
+            </div>
+        </main>
+    </div>
+
+    <script type="module">
+        // Import các hàm cần thiết từ Firebase SDKs
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
+        import { 
+            getAuth, 
+            onAuthStateChanged,
+            createUserWithEmailAndPassword,
+            signInWithEmailAndPassword,
+            signInWithPopup,
+            GoogleAuthProvider,
+            signOut
+        } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
+        import { getDatabase, ref, set, push } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-database.js";
+        import { getAI, getGenerativeModel } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-ai.js";
+
+        // Cấu hình Firebase của bạn
+        const firebaseConfig = {
+            apiKey: "AIzaSyBA_dBZVyGwX2y_PIWOB60AB-OHBAPAzlo",
+            authDomain: "aivoice-7e506.firebaseapp.com",
+            projectId: "aivoice-7e506",
+            storageBucket: "aivoice-7e506.firebasestorage.app",
+            messagingSenderId: "1098820942481",
+            appId: "1:1098820942481:web:c2f4bc50e13047ca2a5d30"
+        };
+
+        // Khởi tạo Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getDatabase(app);
+        // Lưu ý: Để dùng getAI, bạn cần bật Google AI Platform cho dự án trên Google Cloud
+        // const ai = getAI(app); 
+        // const model = getGenerativeModel(ai, { model: "gemini-1.5-flash-latest" });
+
+        console.log("Firebase App Initialized!");
+
+        // Lấy các phần tử từ DOM
+        const authContainer = document.getElementById('auth-container');
+        const mainApp = document.getElementById('main-app');
+        const showLoginBtn = document.getElementById('show-login-btn');
+        const showRegisterBtn = document.getElementById('show-register-btn');
+        const loginForm = document.getElementById('login-form');
+        const registerForm = document.getElementById('register-form');
+        const googleSignInBtn = document.getElementById('google-signin-btn');
+        const signOutBtn = document.getElementById('sign-out-btn');
+        const authStatus = document.getElementById('auth-status');
+        const userInfo = document.getElementById('user-info');
+        
+        // --- Logic chuyển đổi giữa form Đăng nhập và Đăng ký ---
+        showLoginBtn.addEventListener('click', () => {
+            loginForm.classList.remove('hidden');
+            registerForm.classList.add('hidden');
+            showLoginBtn.classList.add('active');
+            showRegisterBtn.classList.remove('active');
+        });
+
+        showRegisterBtn.addEventListener('click', () => {
+            loginForm.classList.add('hidden');
+            registerForm.classList.remove('hidden');
+            showLoginBtn.classList.remove('active');
+            showRegisterBtn.classList.add('active');
+        });
+
+        // --- Lắng nghe trạng thái xác thực ---
+        onAuthStateChanged(auth, user => {
+            if (user) {
+                // Người dùng đã đăng nhập
+                console.log("User is signed in:", user);
+                userInfo.textContent = user.email;
+                authContainer.classList.add('hidden');
+                mainApp.classList.remove('hidden');
+            } else {
+                // Người dùng đã đăng xuất hoặc chưa đăng nhập
+                console.log("User is signed out");
+                authContainer.classList.remove('hidden');
+                mainApp.classList.add('hidden');
+            }
+        });
+        
+        // --- Xử lý sự kiện cho các form ---
+        // Đăng ký bằng Email/Password
+        registerForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('register-email').value;
+            const password = document.getElementById('register-password').value;
+            authStatus.textContent = "Đang tạo tài khoản...";
+            try {
+                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                console.log("Registration successful:", userCredential.user);
+                authStatus.textContent = "";
+            } catch (error) {
+                console.error("Registration error:", error.code, error.message);
+                authStatus.textContent = mapAuthCodeToMessage(error.code);
+            }
+        });
+
+        // Đăng nhập bằng Email/Password
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('login-email').value;
+            const password = document.getElementById('login-password').value;
+            authStatus.textContent = "Đang đăng nhập...";
+            try {
+                const userCredential = await signInWithEmailAndPassword(auth, email, password);
+                console.log("Login successful:", userCredential.user);
+                authStatus.textContent = "";
+            } catch (error) {
+                console.error("Login error:", error.code, error.message);
+                authStatus.textContent = mapAuthCodeToMessage(error.code);
+            }
+        });
+        
+        // Đăng nhập bằng Google
+        googleSignInBtn.addEventListener('click', async () => {
+            const provider = new GoogleAuthProvider();
+            authStatus.textContent = "Đang mở cửa sổ đăng nhập Google...";
+            try {
+                const result = await signInWithPopup(auth, provider);
+                console.log("Google sign-in successful:", result.user);
+                authStatus.textContent = "";
+            } catch (error) {
+                console.error("Google sign-in error:", error.code, error.message);
+                authStatus.textContent = mapAuthCodeToMessage(error.code);
+            }
+        });
+
+        // Đăng xuất
+        signOutBtn.addEventListener('click', async () => {
+            try {
+                await signOut(auth);
+            } catch (error) {
+                console.error("Sign out error:", error);
+            }
+        });
+
+        // Hàm chuyển mã lỗi của Firebase thành tin nhắn tiếng Việt
+        function mapAuthCodeToMessage(code) {
+            switch (code) {
+                case 'auth/invalid-email':
+                    return 'Địa chỉ email không hợp lệ.';
+                case 'auth/user-not-found':
+                case 'auth/wrong-password':
+                    return 'Email hoặc mật khẩu không chính xác.';
+                case 'auth/email-already-in-use':
+                    return 'Email này đã được sử dụng.';
+                case 'auth/weak-password':
+                    return 'Mật khẩu quá yếu, cần ít nhất 6 ký tự.';
+                case 'auth/popup-closed-by-user':
+                    return 'Đã hủy đăng nhập bằng Google.';
+                default:
+                    return 'Đã xảy ra lỗi. Vui lòng thử lại.';
+            }
+        }
+        
+        // TODO: Thêm logic xử lý gửi prompt đến AI và Realtime Database ở đây
+        // Ví dụ:
+        // const sendPromptBtn = document.getElementById('send-prompt-btn');
+        // sendPromptBtn.addEventListener('click', () => { ... });
+
+    </script>
+</body>
+</html>
