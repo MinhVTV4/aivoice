@@ -57,6 +57,38 @@
             font-size: 1.1rem;
             font-weight: 600;
             flex-shrink: 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .chat-header .title {
+            flex-grow: 1;
+            text-align: center;
+            margin-left: 40px; /* Offset to center title correctly */
+        }
+
+        .new-chat-button {
+            background: none;
+            border: none;
+            color: white;
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+        }
+
+        .new-chat-button:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .new-chat-button svg {
+            width: 22px;
+            height: 22px;
         }
 
         /* --- Message Log --- */
@@ -244,19 +276,30 @@
                 border-radius: 12px;
                 box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
             }
+             .chat-header .title {
+                margin-left: 50px;
+             }
+             .new-chat-button {
+                width: 50px;
+             }
         }
     </style>
 </head>
 <body>
 
     <div class="chat-container">
-        <div class="chat-header">Trợ lý Giọng nói AI</div>
+        <div class="chat-header">
+            <div class="title">Trợ lý Giọng nói AI</div>
+            <button class="new-chat-button" id="newChatButton" title="Cuộc trò chuyện mới">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
+                    <path d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
+                    <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
+                </svg>
+            </button>
+        </div>
         
         <div class="chat-log" id="chatLog">
-            <div class="ai-message">
-                <div class="avatar">AI</div>
-                <div class="text">Xin chào! Hệ thống đang khởi tạo...</div>
-            </div>
+             <!-- Messages will be added here -->
         </div>
 
         <div class="chat-controls">
@@ -279,6 +322,7 @@
         const recordButton = document.getElementById('recordButton');
         const statusDisplay = document.getElementById('status');
         const chatLog = document.getElementById('chatLog');
+        const newChatButton = document.getElementById('newChatButton'); // New button
 
         // --- Firebase Configuration ---
         const firebaseConfig = {
@@ -291,48 +335,49 @@
         };
         
         let model;
-        let chatSession; // NEW: To hold the conversation session
+        let chatSession;
 
         // --- Main Initialization ---
         async function main() {
             try {
-                // Initialize Firebase
                 const app = initializeApp(firebaseConfig);
-                console.log("Firebase App initialized!");
-                
-                // Initialize Gemini through Firebase
                 const ai = getAI(app, { backend: new GoogleAIBackend() });
                 model = getGenerativeModel(ai, { model: "gemini-1.5-flash-latest" });
-                console.log("Generative Model instance created!");
+                
+                newChatButton.addEventListener('click', startNewConversation); // Add event listener
 
-                // NEW: Start a chat session to maintain context
-                chatSession = model.startChat({
-                    history: [], // Start with an empty history
-                });
-                console.log("Chat session started!");
-
-                // Enable UI and speech recognition
-                enableApp();
+                startNewConversation(true); // Start the first conversation automatically
 
             } catch(e) {
                 console.error("Initialization failed:", e);
-                addMessageToLog(`Lỗi khởi tạo AI: ${e.message}. Vui lòng kiểm tra API key và cài đặt Firebase.`, 'ai');
+                addMessageToLog(`Lỗi khởi tạo AI: ${e.message}.`, 'ai');
                 statusDisplay.textContent = 'Lỗi khởi tạo AI!';
             }
         }
         
-        function enableApp() {
+        // --- Conversation Management ---
+        function startNewConversation(isInitialLoad = false) {
+            if (!model) return;
+
+            // Reset chat session for a new context
+            chatSession = model.startChat({ history: [] });
+            console.log("New chat session started!");
+
+            // Clear the visual chat log
+            chatLog.innerHTML = ''; 
+
+            const initialMessage = "Xin chào! Bạn muốn hỏi tôi điều gì hôm nay?";
+            addMessageToLog(initialMessage, 'ai');
+            
+            // Only speak on first load, not every time user clicks "new chat"
+            if (isInitialLoad) {
+                 speak(initialMessage);
+            }
+
             recordButton.disabled = false;
             statusDisplay.textContent = 'Nhấn để nói';
-            const initialMessage = "Xin chào! Nhấn nút micro bên dưới để bắt đầu cuộc trò chuyện.";
-            const firstAIMessage = chatLog.querySelector('.ai-message .text');
-            if (firstAIMessage && firstAIMessage.textContent.includes('khởi tạo')) {
-                firstAIMessage.textContent = initialMessage;
-            } else {
-                 addMessageToLog(initialMessage, 'ai');
-            }
-            speak(initialMessage);
         }
+
 
         main();
 
@@ -349,8 +394,13 @@
             let isRecording = false;
 
             recordButton.addEventListener('click', () => {
-                if (!isRecording) recognition.start();
-                else recognition.stop();
+                if (isRecording) {
+                    recognition.stop();
+                } else {
+                     // Stop any currently playing speech before starting to record
+                    window.speechSynthesis.cancel();
+                    recognition.start();
+                }
             });
 
             recognition.onstart = () => {
@@ -374,12 +424,11 @@
             recognition.onerror = (event) => {
                 console.error('Speech recognition error:', event.error);
                 statusDisplay.textContent = `Lỗi: ${event.error}`;
-                addMessageToLog(`Lỗi nhận diện giọng nói: ${event.error}`, 'ai');
             };
 
         } else {
             recordButton.disabled = true;
-            const errorMsg = 'Trình duyệt không hỗ trợ nhận diện giọng nói. Vui lòng dùng Chrome hoặc Edge.';
+            const errorMsg = 'Trình duyệt không hỗ trợ nhận diện giọng nói.';
             statusDisplay.textContent = errorMsg;
             addMessageToLog(errorMsg, 'ai');
         }
@@ -389,9 +438,7 @@
             const messageId = `msg-${Date.now()}`;
             const messageElement = document.createElement('div');
             messageElement.classList.add('message', sender === 'user' ? 'user-message' : 'ai-message');
-            if(isLoading) {
-                messageElement.classList.add('thinking');
-            }
+            if(isLoading) messageElement.classList.add('thinking');
             messageElement.id = messageId;
             
             const avatar = document.createElement('div');
@@ -419,7 +466,7 @@
              if (messageElement) {
                 messageElement.classList.remove('thinking');
                 const textElement = messageElement.querySelector('.text');
-                textElement.innerHTML = ''; // Clear the flashing dots
+                textElement.innerHTML = ''; 
                 textElement.textContent = newText;
              }
         }
@@ -438,7 +485,7 @@
         // --- Real AI Logic with Context ---
         async function callGeminiAPI(prompt) {
             if (!chatSession) {
-                addMessageToLog("Phiên trò chuyện chưa sẵn sàng. Vui lòng thử lại sau.", 'ai');
+                addMessageToLog("Phiên trò chuyện chưa sẵn sàng.", 'ai');
                 return;
             }
             
@@ -447,7 +494,6 @@
             const thinkingMessageId = addMessageToLog('', 'ai', true);
 
             try {
-                // MODIFIED: Use chatSession.sendMessage to send prompt with history
                 const result = await chatSession.sendMessage(prompt);
                 const response = result.response;
                 const text = response.text();
