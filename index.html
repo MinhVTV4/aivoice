@@ -72,7 +72,6 @@
         .header-top .title {
             flex-grow: 1;
             text-align: center;
-            /* Adjust margin to keep it centered with the new button */
             margin-left: 40px; 
         }
 
@@ -99,15 +98,22 @@
             height: 22px;
         }
 
-        /* --- Voice Selection --- */
-        #voiceSelect {
+        /* --- Language and Voice Selection --- */
+        .header-controls {
+            display: flex;
+            gap: 10px;
+            width: 100%;
+            justify-content: center;
+        }
+
+        .header-controls select {
             background-color: var(--primary-hover);
             color: white;
             border: 1px solid rgba(255, 255, 255, 0.5);
             padding: 0.25rem 0.5rem;
             border-radius: 4px;
             font-size: 0.8rem;
-            max-width: 90%;
+            max-width: 45%;
         }
 
         /* --- Message Log --- */
@@ -301,7 +307,7 @@
              .new-chat-button {
                 width: 50px;
              }
-             #voiceSelect {
+             .header-controls select {
                 font-size: 0.9rem;
              }
         }
@@ -320,7 +326,13 @@
                     </svg>
                 </button>
             </div>
-            <select id="voiceSelect"></select>
+            <div class="header-controls">
+                <select id="languageSelect">
+                    <option value="vi-VN" selected>Tiếng Việt</option>
+                    <option value="en-US">English</option>
+                </select>
+                <select id="voiceSelect"></select>
+            </div>
         </div>
         
         <div class="chat-log" id="chatLog">
@@ -348,7 +360,8 @@
         const statusDisplay = document.getElementById('status');
         const chatLog = document.getElementById('chatLog');
         const newChatButton = document.getElementById('newChatButton');
-        const voiceSelect = document.getElementById('voiceSelect'); // Voice selector
+        const voiceSelect = document.getElementById('voiceSelect');
+        const languageSelect = document.getElementById('languageSelect');
 
         // --- Firebase Configuration ---
         const firebaseConfig = {
@@ -362,13 +375,12 @@
         
         let model;
         let chatSession;
-        let availableVoices = []; // To store available voices
+        let availableVoices = [];
 
         // --- Main Initialization ---
         async function main() {
             try {
                 populateVoiceList();
-                // The 'voiceschanged' event is fired when the list of voices is ready
                 if (speechSynthesis.onvoiceschanged !== undefined) {
                     speechSynthesis.onvoiceschanged = populateVoiceList;
                 }
@@ -378,6 +390,7 @@
                 model = getGenerativeModel(ai, { model: "gemini-1.5-flash-latest" });
                 
                 newChatButton.addEventListener('click', () => startNewConversation(false));
+                languageSelect.addEventListener('change', handleLanguageChange);
 
                 startNewConversation(true);
 
@@ -388,6 +401,16 @@
             }
         }
         
+        // --- Event Handlers ---
+        function handleLanguageChange() {
+            if (recognition) {
+                recognition.lang = languageSelect.value;
+                console.log(`Speech recognition language set to: ${recognition.lang}`);
+            }
+            populateVoiceList();
+            startNewConversation(false);
+        }
+
         // --- Conversation Management ---
         function startNewConversation(isInitialLoad = false) {
             if (!model) return;
@@ -396,7 +419,11 @@
             console.log("New chat session started!");
             chatLog.innerHTML = ''; 
 
-            const initialMessage = "Xin chào! Bạn muốn hỏi tôi điều gì hôm nay?";
+            const lang = languageSelect.value;
+            const initialMessage = lang.startsWith('vi')
+                ? "Xin chào! Bạn muốn hỏi tôi điều gì hôm nay?"
+                : "Hello! How can I help you today?";
+            
             addMessageToLog(initialMessage, 'ai');
             
             if (isInitialLoad) {
@@ -404,7 +431,7 @@
             }
 
             recordButton.disabled = false;
-            statusDisplay.textContent = 'Nhấn để nói';
+            statusDisplay.textContent = lang.startsWith('vi') ? 'Nhấn để nói' : 'Press to speak';
         }
 
 
@@ -417,7 +444,7 @@
         if (SpeechRecognition) {
             recognition = new SpeechRecognition();
             recognition.continuous = false;
-            recognition.lang = 'vi-VN';
+            recognition.lang = languageSelect.value;
             recognition.interimResults = false;
             let isRecording = false;
 
@@ -430,8 +457,8 @@
                 }
             });
 
-            recognition.onstart = () => { isRecording = true; recordButton.classList.add('recording'); statusDisplay.textContent = 'Đang lắng nghe...'; };
-            recognition.onend = () => { isRecording = false; recordButton.classList.remove('recording'); statusDisplay.textContent = 'Nhấn để nói'; };
+            recognition.onstart = () => { isRecording = true; recordButton.classList.add('recording'); statusDisplay.textContent = languageSelect.value.startsWith('vi') ? 'Đang lắng nghe...' : 'Listening...'; };
+            recognition.onend = () => { isRecording = false; recordButton.classList.remove('recording'); statusDisplay.textContent = languageSelect.value.startsWith('vi') ? 'Nhấn để nói' : 'Press to speak'; };
             recognition.onresult = (event) => { const transcript = event.results[0][0].transcript; addMessageToLog(transcript, 'user'); callGeminiAPI(transcript); };
             recognition.onerror = (event) => { console.error('Speech recognition error:', event.error); statusDisplay.textContent = `Lỗi: ${event.error}`; };
         } else {
@@ -481,19 +508,21 @@
 
         // --- Text-to-Speech & Voice Selection Functions ---
         function populateVoiceList() {
+            const selectedLangPrefix = languageSelect.value.split('-')[0];
             const voices = speechSynthesis.getVoices();
-            availableVoices = voices.filter(voice => voice.lang.startsWith('vi'));
+            availableVoices = voices.filter(voice => voice.lang.startsWith(selectedLangPrefix));
             
+            voiceSelect.innerHTML = '';
             if (availableVoices.length === 0) {
-                voiceSelect.innerHTML = '<option value="">Không có giọng Tiếng Việt</option>';
+                const option = document.createElement('option');
+                option.textContent = 'Không có giọng đọc';
+                voiceSelect.appendChild(option);
                 return;
             }
             
-            voiceSelect.innerHTML = ''; // Clear previous options
             availableVoices.forEach(voice => {
                 const option = document.createElement('option');
                 option.textContent = `${voice.name} (${voice.lang})`;
-                option.setAttribute('data-lang', voice.lang);
                 option.setAttribute('data-name', voice.name);
                 voiceSelect.appendChild(option);
             });
@@ -502,20 +531,17 @@
         function speak(text) {
             if ('speechSynthesis' in window) {
                 const utterance = new SpeechSynthesisUtterance(text);
-                
-                // Get the selected voice name from the dropdown
                 const selectedOption = voiceSelect.selectedOptions[0];
-                if (selectedOption) {
-                    const selectedVoiceName = selectedOption.getAttribute('data-name');
+
+                if (selectedOption && selectedOption.dataset.name) {
+                    const selectedVoiceName = selectedOption.dataset.name;
                     const voice = availableVoices.find(v => v.name === selectedVoiceName);
                     if (voice) {
                         utterance.voice = voice;
-                        utterance.lang = voice.lang;
                     }
-                } else {
-                    utterance.lang = 'vi-VN'; // Fallback
                 }
                 
+                utterance.lang = languageSelect.value;
                 utterance.rate = 1.0;
                 window.speechSynthesis.cancel();
                 window.speechSynthesis.speak(utterance);
@@ -529,7 +555,7 @@
                 return;
             }
             
-            statusDisplay.textContent = 'AI đang xử lý...';
+            statusDisplay.textContent = languageSelect.value.startsWith('vi') ? 'AI đang xử lý...' : 'AI is thinking...';
             recordButton.disabled = true;
             const thinkingMessageId = addMessageToLog('', 'ai', true);
 
@@ -546,7 +572,7 @@
                 const errorText = `Lỗi từ Gemini: ${error.message}`;
                 updateMessageInLog(thinkingMessageId, errorText);
             } finally {
-                statusDisplay.textContent = 'Nhấn để nói';
+                statusDisplay.textContent = languageSelect.value.startsWith('vi') ? 'Nhấn để nói' : 'Press to speak';
                 recordButton.disabled = false;
             }
         }
