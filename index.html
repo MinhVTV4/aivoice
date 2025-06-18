@@ -6,6 +6,10 @@
     <title>Trợ lý Giọng nói AI</title>
     <!-- TailwindCSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Marked.js for Markdown parsing -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- DOMPurify for sanitizing HTML to prevent XSS attacks -->
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.1/dist/dompurify.min.js"></script>
     <style>
         #chatLog::-webkit-scrollbar { width: 6px; }
         #chatLog::-webkit-scrollbar-track { background: #f1f1f1; }
@@ -15,13 +19,61 @@
         .message-animate { animation: slideInUp 0.4s ease-out; }
         @keyframes pulse-blue { 0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); } 70% { box-shadow: 0 0 0 15px rgba(59, 130, 246, 0); } 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); } }
         .listening { animation: pulse-blue 1.5s infinite; }
-        html, body { height: 100%; }
-        @media (max-width: 767px) { html, body { height: -webkit-fill-available; } }
+        
+        /* Fullscreen for mobile */
+        html, body {
+            height: 100%;
+            overflow: hidden; /* Prevent bouncing */
+        }
+        #app-container {
+             height: 100%;
+             height: -webkit-fill-available; /* For iOS Safari */
+        }
+        
+        /* Styles for Markdown content */
+        .text-content ul, .text-content ol {
+            padding-left: 1.5rem;
+            margin-top: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .text-content ul { list-style-type: disc; }
+        .text-content ol { list-style-type: decimal; }
+        .text-content li { margin-bottom: 0.25rem; }
+        .text-content p { margin-bottom: 0.75rem; }
+        .text-content p:last-child { margin-bottom: 0; }
+        .text-content strong { font-weight: 600; }
+        .text-content code {
+            background-color: #e5e7eb;
+            padding: 0.15rem 0.3rem;
+            border-radius: 0.25rem;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+        .text-content pre {
+            background-color: #1f2937;
+            color: #d1d5db;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            overflow-x: auto;
+            margin-top: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .text-content pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+        .text-content blockquote {
+            border-left: 4px solid #d1d5db;
+            padding-left: 1rem;
+            margin-left: 0.25rem;
+            font-style: italic;
+            color: #4b5563;
+        }
     </style>
 </head>
 <body class="bg-gray-100 flex items-center justify-center font-sans">
 
-    <div id="chat-container" class="bg-white w-full h-full flex flex-col shadow-lg md:max-w-2xl md:h-[90vh] md:max-h-[800px] md:rounded-xl overflow-hidden">
+    <div id="app-container" class="bg-white w-full flex flex-col md:shadow-lg md:max-w-2xl md:h-[90vh] md:max-h-[800px] md:rounded-xl md:overflow-hidden">
         <!-- Header -->
         <div class="bg-white border-b border-gray-200 p-4 flex-shrink-0 flex justify-between items-center">
             <div class="flex items-center gap-2">
@@ -38,10 +90,10 @@
             </div>
         </div>
         
-        <!-- Khung Chat -->
+        <!-- Chat Log -->
         <div class="flex-grow p-4 md:p-6 overflow-y-auto bg-gray-50" id="chatLog"></div>
 
-        <!-- Phần Điều Khiển -->
+        <!-- Controls -->
         <div class="p-4 bg-white border-t border-gray-200 text-center flex-shrink-0 flex flex-col items-center gap-2">
             <div id="recordIndicator" class="w-16 h-16 rounded-full border-none bg-gray-400 text-white cursor-pointer flex justify-center items-center transition-all duration-300 shadow-lg">
                 <svg id="mic-icon" xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" viewBox="0 0 20 20" fill="currentColor"><path d="M7 4a3 3 0 016 0v5a3 3 0 11-6 0V4z" /><path d="M3.5 6.5A.5.5 0 014 7v1a4 4 0 008 0V7a.5.5 0 011 0v1a5 5 0 01-4.5 4.975V15h3a.5.5 0 010 1h-7a.5.5 0 010-1h3v-2.025A5 5 0 013 8V7a.5.5 0 01.5-.5z" /></svg>
@@ -50,7 +102,7 @@
         </div>
     </div>
 
-    <!-- Modal Cài đặt -->
+    <!-- Settings Modal -->
     <div id="settingsModal" class="fixed inset-0 bg-black bg-opacity-40 items-center justify-center hidden z-50">
         <div class="bg-white rounded-lg shadow-xl p-6 w-11/12 max-w-sm">
             <h2 class="text-lg font-semibold text-gray-800 mb-4">Cài đặt</h2>
@@ -74,7 +126,6 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
         import { getAI, getGenerativeModel, GoogleAIBackend } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-ai.js";
 
-        // --- DOM Elements & State ---
         const ui = {
             recordIndicator: document.getElementById('recordIndicator'),
             statusDisplay: document.getElementById('status'),
@@ -94,6 +145,7 @@
             isProcessing: false,
             silenceTimer: null,
             currentInterimMessageId: null,
+            hasProcessedFinal: false,
         };
 
         const firebaseConfig = {
@@ -139,26 +191,9 @@
             recognition.continuous = true;
             recognition.interimResults = true;
             recognition.lang = ui.languageSelect.value;
-
-            recognition.onstart = () => {
-                state.isListening = true;
-                updateStatus('Đang lắng nghe...', 'listening');
-            };
-
-            recognition.onend = () => {
-                state.isListening = false;
-                if (!state.isProcessing && !state.isSpeaking) {
-                    updateStatus('Tạm dừng', 'idle');
-                }
-            };
-
-            recognition.onerror = (event) => {
-                if(event.error !== 'no-speech' && event.error !== 'aborted'){
-                    console.error('Speech recognition error:', event.error);
-                    updateStatus(`Lỗi: ${event.error}`, 'error');
-                }
-            };
-
+            recognition.onstart = () => { state.isListening = true; updateStatus('Đang lắng nghe...', 'listening'); };
+            recognition.onend = () => { state.isListening = false; if (!state.isProcessing && !state.isSpeaking) updateStatus('Tạm dừng', 'idle'); };
+            recognition.onerror = (event) => { if(event.error !== 'no-speech' && event.error !== 'aborted') { console.error('Speech recognition error:', event.error); updateStatus(`Lỗi: ${event.error}`, 'error'); }};
             recognition.onresult = handleRecognitionResult;
         }
 
@@ -166,50 +201,48 @@
             clearTimeout(state.silenceTimer);
             let final_transcript = '';
             let interim_transcript = '';
-
             for (let i = event.resultIndex; i < event.results.length; ++i) {
-                if (event.results[i].isFinal) {
-                    final_transcript += event.results[i][0].transcript;
-                } else {
-                    interim_transcript += event.results[i][0].transcript;
-                }
+                if (event.results[i].isFinal) final_transcript += event.results[i][0].transcript;
+                else interim_transcript += event.results[i][0].transcript;
             }
 
             if(interim_transcript) {
-                if (!state.currentInterimMessageId) {
-                    state.currentInterimMessageId = addMessageToLog(interim_transcript, 'user', true);
-                } else {
-                    updateMessageInLog(state.currentInterimMessageId, interim_transcript);
-                }
+                if (!state.currentInterimMessageId) state.currentInterimMessageId = addMessageToLog(interim_transcript, 'user', true);
+                else updateMessageInLog(state.currentInterimMessageId, interim_transcript);
             }
             
             if (final_transcript) {
-                recognition.stop();
-                if (state.currentInterimMessageId) {
-                    updateMessageInLog(state.currentInterimMessageId, final_transcript, false);
-                    state.currentInterimMessageId = null;
-                } else {
-                    addMessageToLog(final_transcript, 'user');
-                }
-                callGeminiAPI(final_transcript);
+                processFinalTranscript(final_transcript);
             } else {
                 state.silenceTimer = setTimeout(() => {
-                    recognition.stop();
                     const lastInterimBubble = state.currentInterimMessageId ? document.getElementById(state.currentInterimMessageId) : null;
                     if (lastInterimBubble) {
                         const transcript = lastInterimBubble.querySelector('.text-content').textContent;
-                        updateMessageInLog(state.currentInterimMessageId, transcript, false);
-                        state.currentInterimMessageId = null;
-                        if(transcript.trim()) callGeminiAPI(transcript);
+                        processFinalTranscript(transcript);
                     }
                 }, 1500);
             }
+        }
+        
+        function processFinalTranscript(transcript) {
+            if (state.hasProcessedFinal) return;
+            state.hasProcessedFinal = true;
+            clearTimeout(state.silenceTimer);
+            if(state.isListening) recognition.stop();
+
+            if (state.currentInterimMessageId) {
+                updateMessageInLog(state.currentInterimMessageId, transcript, false);
+                state.currentInterimMessageId = null;
+            } else if (transcript.trim()){
+                addMessageToLog(transcript.trim(), 'user');
+            }
+            if (transcript.trim()) callGeminiAPI(transcript);
+            else startListening();
         }
 
         function startNewConversation() {
             if (state.isListening) recognition.stop();
             window.speechSynthesis.cancel();
-
             chatSession = model.startChat({ history: [] });
             ui.chatLog.innerHTML = ''; 
             const welcomeMsg = ui.languageSelect.value.startsWith('vi') ? "Xin chào! Bắt đầu nói chuyện thôi nào." : "Hello! Let's start talking.";
@@ -219,18 +252,15 @@
 
         async function handleLanguageChange() {
             await populateVoiceList();
-            if (recognition) {
-                recognition.lang = ui.languageSelect.value;
-            }
+            if (recognition) recognition.lang = ui.languageSelect.value;
         }
         
         function startListening() {
             if (state.isListening || state.isSpeaking || state.isProcessing || !recognition) return;
+            state.hasProcessedFinal = false;
             try {
                 recognition.start();
-            } catch (e) {
-                console.error("Could not start recognition", e);
-            }
+            } catch (e) { console.error("Could not start recognition", e); }
         }
 
         function addMessageToLog(text, sender, isInterim = false) {
@@ -238,7 +268,6 @@
             const messageWrapper = document.createElement('div');
             messageWrapper.id = messageId;
             messageWrapper.className = `flex items-start gap-2 max-w-[85%] message-animate ${sender === 'user' ? 'self-end flex-row-reverse' : 'self-start'}`;
-            
             const avatar = document.createElement('div');
             avatar.className = 'w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 shadow-sm mt-1';
             if (sender === 'user') {
@@ -248,39 +277,29 @@
                 avatar.classList.add('bg-gray-200');
                 avatar.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-600" viewBox="0 0 20 20" fill="currentColor"><path d="M4 3a2 2 0 100 4h12a2 2 0 100-4H4z" /><path fill-rule="evenodd" d="M3 8h14v7a2 2 0 01-2 2H5a2 2 0 01-2-2V8zm5 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" clip-rule="evenodd" /></svg>`;
             }
-
-            // *** THAY ĐỔI: Thêm container cho bubble và nút loa ***
             const contentContainer = document.createElement('div');
             contentContainer.className = 'flex items-center gap-2';
-
             const bubble = document.createElement('div');
             bubble.className = 'text-content px-4 py-2.5 rounded-2xl leading-relaxed relative';
-            const bubbleClasses = sender === 'user' 
-                ? ['bg-blue-600', 'text-white', 'rounded-br-lg']
-                : ['bg-white', 'text-gray-800', 'rounded-bl-lg', 'shadow-sm'];
+            const bubbleClasses = sender === 'user' ? ['bg-blue-600', 'text-white', 'rounded-br-lg'] : ['bg-white', 'text-gray-800', 'rounded-bl-lg', 'shadow-sm'];
             bubble.classList.add(...bubbleClasses);
             if (isInterim) bubble.classList.add('opacity-70');
             
-            if (sender === 'ai' && !text) {
-                 bubble.innerHTML = `<div class="flex space-x-1.5"><div class="w-2 h-2 bg-gray-400 rounded-full animate-pulse"></div><div class="w-2 h-2 bg-gray-400 rounded-full animate-pulse [animation-delay:0.1s]"></div><div class="w-2 h-2 bg-gray-400 rounded-full animate-pulse [animation-delay:0.2s]"></div></div>`;
-            } else {
-                 bubble.textContent = text;
-            }
+            // Render text or loading indicator
+            if (sender === 'ai' && !text) { bubble.innerHTML = `<div class="flex space-x-1.5"><div class="w-2 h-2 bg-gray-400 rounded-full animate-pulse"></div><div class="w-2 h-2 bg-gray-400 rounded-full animate-pulse [animation-delay:0.1s]"></div><div class="w-2 h-2 bg-gray-400 rounded-full animate-pulse [animation-delay:0.2s]"></div></div>`;}
+            else { bubble.textContent = text; }
             
             contentContainer.appendChild(bubble);
-
-            // *** THAY ĐỔI: Thêm nút loa cho tin nhắn AI ***
             if (sender === 'ai') {
                 const speakButton = document.createElement('button');
                 speakButton.className = 'speak-btn p-1.5 rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-700 transition-colors hidden self-center';
                 speakButton.title = "Đọc lại";
                 speakButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M7.788 4.233a.75.75 0 011.06-.212l7.5 5.25a.75.75 0 010 1.258l-7.5 5.25a.75.75 0 01-1.272-.629V5.05a.75.75 0 01.212-.817z" /></svg>`;
-                speakButton.onclick = () => speak(bubble.textContent);
+                speakButton.onclick = () => speak(bubble.innerHTML, null, true); // Use innerHTML to speak formatted text
                 contentContainer.appendChild(speakButton);
             }
-
             messageWrapper.appendChild(avatar);
-            messageWrapper.appendChild(contentContainer); // Add the container instead of just the bubble
+            messageWrapper.appendChild(contentContainer);
             ui.chatLog.appendChild(messageWrapper);
             ui.chatLog.scrollTop = ui.chatLog.scrollHeight;
             return messageId;
@@ -289,13 +308,17 @@
         function updateMessageInLog(messageId, newText, isInterim = false) {
              const messageWrapper = document.getElementById(messageId);
              if (!messageWrapper) return;
-
              const bubble = messageWrapper.querySelector('.text-content');
              if (bubble) {
-                bubble.textContent = newText;
+                if (isInterim) {
+                    bubble.textContent = newText;
+                } else {
+                    // *** THAY ĐỔI: Parse Markdown and sanitize ***
+                    bubble.innerHTML = DOMPurify.sanitize(marked.parse(newText));
+                }
+                
                 if (!isInterim) {
                     bubble.classList.remove('opacity-70');
-                    // *** THAY ĐỔI: Hiển thị nút loa khi có text cuối cùng ***
                     const speakButton = messageWrapper.querySelector('.speak-btn');
                     if (speakButton && newText) speakButton.classList.remove('hidden');
                 }
@@ -303,14 +326,10 @@
         }
         
         async function callGeminiAPI(prompt) {
-            if (!prompt.trim()) {
-                startListening();
-                return;
-            };
+            if (!prompt.trim()) { startListening(); return; };
             state.isProcessing = true;
             updateStatus('AI đang xử lý...', 'processing');
             const thinkingMessageId = addMessageToLog('', 'ai');
-
             try {
                 const result = await chatSession.sendMessage(prompt);
                 const text = result.response.text();
@@ -325,31 +344,25 @@
             }
         }
 
-        function speak(text, onEndCallback) {
-            if (!('speechSynthesis' in window) || !text) {
-                if (onEndCallback) onEndCallback();
-                return;
+        // *** THAY ĐỔI: Hàm speak chấp nhận cả raw text và HTML ***
+        function speak(text, onEndCallback, isHTML = false) {
+            if (!('speechSynthesis' in window) || !text) { if (onEndCallback) onEndCallback(); return; }
+            
+            let textToSpeak = text;
+            if (isHTML) {
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = text;
+                textToSpeak = tempDiv.textContent || tempDiv.innerText || "";
             }
 
-            const utterance = new SpeechSynthesisUtterance(text);
+            const utterance = new SpeechSynthesisUtterance(textToSpeak);
             const selectedVoiceName = ui.voiceSelect.selectedOptions[0]?.dataset.name;
-            if (selectedVoiceName) {
-                utterance.voice = availableVoices.find(v => v.name === selectedVoiceName);
-            }
+            if (selectedVoiceName) utterance.voice = availableVoices.find(v => v.name === selectedVoiceName);
             utterance.lang = ui.languageSelect.value;
             utterance.rate = 1.0;
-            utterance.onstart = () => {
-                state.isSpeaking = true;
-                updateStatus('AI đang trả lời...', 'speaking');
-            }
-            utterance.onend = () => {
-                state.isSpeaking = false;
-                if (onEndCallback) onEndCallback();
-            };
-            utterance.onerror = () => {
-                state.isSpeaking = false;
-                if (onEndCallback) onEndCallback();
-            };
+            utterance.onstart = () => { state.isSpeaking = true; updateStatus('AI đang trả lời...', 'speaking'); };
+            utterance.onend = () => { state.isSpeaking = false; if (onEndCallback) onEndCallback(); };
+            utterance.onerror = () => { state.isSpeaking = false; if (onEndCallback) onEndCallback(); };
             window.speechSynthesis.cancel();
             window.speechSynthesis.speak(utterance);
         }
@@ -358,30 +371,14 @@
             ui.statusDisplay.textContent = text;
             const indicator = ui.statusIndicator;
             const recordBtn = ui.recordIndicator;
-            
             indicator.className = 'relative inline-flex rounded-full h-3 w-3';
             recordBtn.classList.remove('listening', 'bg-red-500', 'bg-blue-600', 'bg-gray-400');
-
             switch (statusType) {
-                case 'listening':
-                    indicator.classList.add('bg-blue-500');
-                    recordBtn.classList.add('bg-blue-600', 'listening');
-                    break;
-                case 'processing':
-                    indicator.classList.add('bg-yellow-500');
-                    recordBtn.classList.add('bg-red-500');
-                    break;
-                case 'speaking':
-                    indicator.classList.add('bg-green-500');
-                    recordBtn.classList.add('bg-blue-600');
-                    break;
-                case 'error':
-                    indicator.classList.add('bg-red-500');
-                    recordBtn.classList.add('bg-gray-400');
-                    break;
-                default: // idle
-                    indicator.classList.add('bg-gray-400');
-                    recordBtn.classList.add('bg-gray-400');
+                case 'listening': indicator.classList.add('bg-blue-500'); recordBtn.classList.add('bg-blue-600', 'listening'); break;
+                case 'processing': indicator.classList.add('bg-yellow-500'); recordBtn.classList.add('bg-red-500'); break;
+                case 'speaking': indicator.classList.add('bg-green-500'); recordBtn.classList.add('bg-blue-600'); break;
+                case 'error': indicator.classList.add('bg-red-500'); recordBtn.classList.add('bg-gray-400'); break;
+                default: indicator.classList.add('bg-gray-400'); recordBtn.classList.add('bg-gray-400');
             }
         }
         
@@ -397,16 +394,8 @@
                     const selectedLang = ui.languageSelect.value;
                     availableVoices = speechSynthesis.getVoices().filter(voice => voice.lang.startsWith(selectedLang.split('-')[0]));
                     ui.voiceSelect.innerHTML = '';
-                    if (availableVoices.length === 0) {
-                        ui.voiceSelect.innerHTML = '<option>Không có giọng đọc</option>';
-                    } else {
-                        availableVoices.forEach(voice => {
-                            const option = document.createElement('option');
-                            option.textContent = `${voice.name} (${voice.lang})`;
-                            option.setAttribute('data-name', voice.name);
-                            ui.voiceSelect.appendChild(option);
-                        });
-                    }
+                    if (availableVoices.length === 0) { ui.voiceSelect.innerHTML = '<option>Không có giọng đọc</option>';}
+                    else { availableVoices.forEach(voice => { const option = document.createElement('option'); option.textContent = `${voice.name} (${voice.lang})`; option.setAttribute('data-name', voice.name); ui.voiceSelect.appendChild(option); }); }
                     resolve();
                 }, 150);
             });
