@@ -13,8 +13,8 @@
         #chatLog::-webkit-scrollbar-thumb:hover { background: #555; }
         @keyframes slideInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
         .message-animate { animation: slideInUp 0.4s ease-out; }
-        @keyframes pulse-red { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); } 70% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
-        .recording { animation: pulse-red 1.5s infinite; }
+        @keyframes pulse-blue { 0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); } 70% { box-shadow: 0 0 0 15px rgba(59, 130, 246, 0); } 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); } }
+        .listening { animation: pulse-blue 1.5s infinite; }
         html, body { height: 100%; }
         @media (max-width: 767px) { html, body { height: -webkit-fill-available; } }
     </style>
@@ -25,7 +25,7 @@
         <!-- Header -->
         <div class="bg-white border-b border-gray-200 p-4 flex-shrink-0 flex justify-between items-center">
             <div class="flex items-center gap-2">
-                <span class="relative flex h-3 w-3"><span class="relative inline-flex rounded-full h-3 w-3 bg-blue-500"></span></span>
+                <span id="status-indicator" class="relative flex h-3 w-3"><span class="relative inline-flex rounded-full h-3 w-3 bg-gray-400"></span></span>
                 <h1 class="text-base font-semibold text-gray-800">Trợ lý Giọng nói AI</h1>
             </div>
             <div>
@@ -43,10 +43,10 @@
 
         <!-- Phần Điều Khiển -->
         <div class="p-4 bg-white border-t border-gray-200 text-center flex-shrink-0 flex flex-col items-center gap-2">
-            <button id="recordButton" disabled class="w-16 h-16 rounded-full border-none bg-blue-600 text-white cursor-pointer flex justify-center items-center transition-all duration-300 shadow-lg hover:bg-blue-700 active:scale-95 focus:outline-none focus:ring-4 focus:ring-blue-300 disabled:bg-gray-400 disabled:cursor-not-allowed">
+            <div id="recordIndicator" class="w-16 h-16 rounded-full border-none bg-gray-400 text-white cursor-pointer flex justify-center items-center transition-all duration-300 shadow-lg">
                 <svg id="mic-icon" xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" viewBox="0 0 20 20" fill="currentColor"><path d="M7 4a3 3 0 016 0v5a3 3 0 11-6 0V4z" /><path d="M3.5 6.5A.5.5 0 014 7v1a4 4 0 008 0V7a.5.5 0 011 0v1a5 5 0 01-4.5 4.975V15h3a.5.5 0 010 1h-7a.5.5 0 010-1h3v-2.025A5 5 0 013 8V7a.5.5 0 01.5-.5z" /></svg>
-            </button>
-            <div id="status" class="text-gray-500 text-xs italic min-h-[18px]">Đang khởi tạo...</div>
+            </div>
+            <div id="status" class="text-gray-500 text-xs italic min-h-[18px]">Nhấn + để bắt đầu hội thoại</div>
         </div>
     </div>
 
@@ -74,9 +74,9 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
         import { getAI, getGenerativeModel, GoogleAIBackend } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-ai.js";
 
-        // --- DOM Elements ---
+        // --- DOM Elements & State ---
         const ui = {
-            recordButton: document.getElementById('recordButton'),
+            recordIndicator: document.getElementById('recordIndicator'),
             statusDisplay: document.getElementById('status'),
             chatLog: document.getElementById('chatLog'),
             newChatButton: document.getElementById('newChatButton'),
@@ -85,6 +85,15 @@
             closeSettingsButton: document.getElementById('closeSettingsButton'),
             languageSelect: document.getElementById('languageSelect'),
             voiceSelect: document.getElementById('voiceSelect'),
+            statusIndicator: document.getElementById('status-indicator').querySelector('span'),
+        };
+
+        const state = {
+            isListening: false,
+            isSpeaking: false,
+            isProcessing: false,
+            silenceTimer: null,
+            currentInterimMessageId: null,
         };
 
         const firebaseConfig = {
@@ -97,7 +106,6 @@
         };
         
         let model, chatSession, recognition, availableVoices = [];
-        let isRecording = false;
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
         async function main() {
@@ -108,21 +116,19 @@
                 
                 initializeEventListeners();
                 await populateLanguageOptions();
-                if (SpeechRecognition) {
-                    initializeSpeechRecognition();
+                if (!SpeechRecognition) {
+                    updateStatus('Trình duyệt không hỗ trợ giọng nói', 'error');
                 } else {
-                    ui.statusDisplay.textContent = 'Trình duyệt không hỗ trợ giọng nói.';
+                    initializeSpeechRecognition();
                 }
-                startNewConversation();
             } catch(e) {
                 console.error("Initialization failed:", e);
-                ui.statusDisplay.textContent = 'Lỗi khởi tạo AI.';
+                updateStatus('Lỗi khởi tạo AI', 'error');
             }
         }
 
         function initializeEventListeners() {
             ui.newChatButton.addEventListener('click', startNewConversation);
-            ui.recordButton.addEventListener('click', toggleRecording);
             ui.settingsButton.addEventListener('click', () => ui.settingsModal.classList.replace('hidden', 'flex'));
             ui.closeSettingsButton.addEventListener('click', () => ui.settingsModal.classList.replace('flex', 'hidden'));
             ui.languageSelect.addEventListener('change', handleLanguageChange);
@@ -130,54 +136,85 @@
 
         function initializeSpeechRecognition() {
             recognition = new SpeechRecognition();
-            recognition.continuous = false;
-            recognition.interimResults = false;
+            recognition.continuous = true;
+            recognition.interimResults = true;
             recognition.lang = ui.languageSelect.value;
 
             recognition.onstart = () => {
-                isRecording = true;
-                ui.recordButton.classList.add('recording', 'bg-red-600');
-                ui.statusDisplay.textContent = 'Đang lắng nghe...';
+                state.isListening = true;
+                updateStatus('Đang lắng nghe...', 'listening');
             };
 
             recognition.onend = () => {
-                isRecording = false;
-                ui.recordButton.classList.remove('recording', 'bg-red-600');
-                ui.statusDisplay.textContent = 'Nhấn để nói';
+                state.isListening = false;
+                if (!state.isProcessing && !state.isSpeaking) {
+                    updateStatus('Tạm dừng', 'idle');
+                }
             };
 
-            recognition.onerror = (event) => console.error('Speech recognition error:', event.error);
-            recognition.onresult = (event) => {
-                const transcript = event.results[0][0].transcript;
-                addMessageToLog(transcript, 'user');
-                callGeminiAPI(transcript);
+            recognition.onerror = (event) => {
+                if(event.error !== 'no-speech' && event.error !== 'aborted'){
+                    console.error('Speech recognition error:', event.error);
+                    updateStatus(`Lỗi: ${event.error}`, 'error');
+                }
             };
+
+            recognition.onresult = handleRecognitionResult;
         }
 
-        function toggleRecording() {
-            if (!recognition) return;
-            if (isRecording) {
-                recognition.stop();
-            } else {
-                try {
-                    window.speechSynthesis.cancel();
-                    recognition.start();
-                } catch(e) {
-                    console.error("Could not start recognition", e);
+        function handleRecognitionResult(event) {
+            clearTimeout(state.silenceTimer);
+            let final_transcript = '';
+            let interim_transcript = '';
+
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+                if (event.results[i].isFinal) {
+                    final_transcript += event.results[i][0].transcript;
+                } else {
+                    interim_transcript += event.results[i][0].transcript;
                 }
             }
+
+            if(interim_transcript) {
+                if (!state.currentInterimMessageId) {
+                    state.currentInterimMessageId = addMessageToLog(interim_transcript, 'user', true);
+                } else {
+                    updateMessageInLog(state.currentInterimMessageId, interim_transcript);
+                }
+            }
+            
+            if (final_transcript) {
+                recognition.stop();
+                if (state.currentInterimMessageId) {
+                    updateMessageInLog(state.currentInterimMessageId, final_transcript, false);
+                    state.currentInterimMessageId = null;
+                } else {
+                    addMessageToLog(final_transcript, 'user');
+                }
+                callGeminiAPI(final_transcript);
+            } else {
+                state.silenceTimer = setTimeout(() => {
+                    recognition.stop();
+                    const lastInterimBubble = state.currentInterimMessageId ? document.getElementById(state.currentInterimMessageId) : null;
+                    if (lastInterimBubble) {
+                        const transcript = lastInterimBubble.querySelector('.text-content').textContent;
+                        updateMessageInLog(state.currentInterimMessageId, transcript, false);
+                        state.currentInterimMessageId = null;
+                        if(transcript.trim()) callGeminiAPI(transcript);
+                    }
+                }, 1500);
+            }
         }
-        
+
         function startNewConversation() {
-            if (isRecording) recognition.stop();
+            if (state.isListening) recognition.stop();
             window.speechSynthesis.cancel();
+
             chatSession = model.startChat({ history: [] });
             ui.chatLog.innerHTML = ''; 
-            const welcomeMsg = ui.languageSelect.value.startsWith('vi') ? "Xin chào! Bạn muốn hỏi gì hôm nay?" : "Hello! What would you like to ask?";
+            const welcomeMsg = ui.languageSelect.value.startsWith('vi') ? "Xin chào! Bắt đầu nói chuyện thôi nào." : "Hello! Let's start talking.";
             addMessageToLog(welcomeMsg, 'ai');
-            speak(welcomeMsg);
-            ui.recordButton.disabled = false;
-            ui.statusDisplay.textContent = 'Nhấn để nói';
+            speak(welcomeMsg, startListening);
         }
 
         async function handleLanguageChange() {
@@ -185,17 +222,25 @@
             if (recognition) {
                 recognition.lang = ui.languageSelect.value;
             }
-            startNewConversation(); // Bắt đầu lại cuộc hội thoại với ngôn ngữ mới
+        }
+        
+        function startListening() {
+            if (state.isListening || state.isSpeaking || state.isProcessing || !recognition) return;
+            try {
+                recognition.start();
+            } catch (e) {
+                console.error("Could not start recognition", e);
+            }
         }
 
-        function addMessageToLog(text, sender) {
+        function addMessageToLog(text, sender, isInterim = false) {
             const messageId = `msg-${Date.now()}`;
             const messageWrapper = document.createElement('div');
             messageWrapper.id = messageId;
-            messageWrapper.className = `flex items-end gap-2 max-w-[85%] message-animate ${sender === 'user' ? 'self-end flex-row-reverse' : 'self-start'}`;
-
+            messageWrapper.className = `flex items-start gap-2 max-w-[85%] message-animate ${sender === 'user' ? 'self-end flex-row-reverse' : 'self-start'}`;
+            
             const avatar = document.createElement('div');
-            avatar.className = 'w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 shadow-sm';
+            avatar.className = 'w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 shadow-sm mt-1';
             if (sender === 'user') {
                 avatar.classList.add('bg-blue-100');
                 avatar.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-blue-600" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd" /></svg>`;
@@ -204,86 +249,87 @@
                 avatar.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-600" viewBox="0 0 20 20" fill="currentColor"><path d="M4 3a2 2 0 100 4h12a2 2 0 100-4H4z" /><path fill-rule="evenodd" d="M3 8h14v7a2 2 0 01-2 2H5a2 2 0 01-2-2V8zm5 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" clip-rule="evenodd" /></svg>`;
             }
 
+            // *** THAY ĐỔI: Thêm container cho bubble và nút loa ***
+            const contentContainer = document.createElement('div');
+            contentContainer.className = 'flex items-center gap-2';
+
             const bubble = document.createElement('div');
             bubble.className = 'text-content px-4 py-2.5 rounded-2xl leading-relaxed relative';
             const bubbleClasses = sender === 'user' 
                 ? ['bg-blue-600', 'text-white', 'rounded-br-lg']
                 : ['bg-white', 'text-gray-800', 'rounded-bl-lg', 'shadow-sm'];
             bubble.classList.add(...bubbleClasses);
+            if (isInterim) bubble.classList.add('opacity-70');
             
-            if (sender === 'ai' && !text) { // Loading state
-                 bubble.innerHTML = `<div class="flex space-x-1.5"><div class="w-2 h-2 bg-gray-400 rounded-full animate-pulse [animation-delay:-0.3s]"></div><div class="w-2 h-2 bg-gray-400 rounded-full animate-pulse [animation-delay:-0.15s]"></div><div class="w-2 h-2 bg-gray-400 rounded-full animate-pulse"></div></div>`;
+            if (sender === 'ai' && !text) {
+                 bubble.innerHTML = `<div class="flex space-x-1.5"><div class="w-2 h-2 bg-gray-400 rounded-full animate-pulse"></div><div class="w-2 h-2 bg-gray-400 rounded-full animate-pulse [animation-delay:0.1s]"></div><div class="w-2 h-2 bg-gray-400 rounded-full animate-pulse [animation-delay:0.2s]"></div></div>`;
             } else {
                  bubble.textContent = text;
             }
             
+            contentContainer.appendChild(bubble);
+
+            // *** THAY ĐỔI: Thêm nút loa cho tin nhắn AI ***
+            if (sender === 'ai') {
+                const speakButton = document.createElement('button');
+                speakButton.className = 'speak-btn p-1.5 rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-700 transition-colors hidden self-center';
+                speakButton.title = "Đọc lại";
+                speakButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M7.788 4.233a.75.75 0 011.06-.212l7.5 5.25a.75.75 0 010 1.258l-7.5 5.25a.75.75 0 01-1.272-.629V5.05a.75.75 0 01.212-.817z" /></svg>`;
+                speakButton.onclick = () => speak(bubble.textContent);
+                contentContainer.appendChild(speakButton);
+            }
+
             messageWrapper.appendChild(avatar);
-            messageWrapper.appendChild(bubble);
+            messageWrapper.appendChild(contentContainer); // Add the container instead of just the bubble
             ui.chatLog.appendChild(messageWrapper);
             ui.chatLog.scrollTop = ui.chatLog.scrollHeight;
             return messageId;
         }
 
-        function updateMessageInLog(messageId, newText) {
-             const bubble = document.getElementById(messageId)?.querySelector('.text-content');
-             if (bubble) bubble.textContent = newText;
-        }
+        function updateMessageInLog(messageId, newText, isInterim = false) {
+             const messageWrapper = document.getElementById(messageId);
+             if (!messageWrapper) return;
 
-        async function populateLanguageOptions() {
-             const languages = [
-                { value: 'vi-VN', text: 'Tiếng Việt' },
-                { value: 'en-US', text: 'English (US)' },
-                { value: 'en-GB', text: 'English (UK)' },
-                { value: 'ja-JP', text: '日本語' },
-                { value: 'ko-KR', text: '한국어' },
-             ];
-             ui.languageSelect.innerHTML = languages.map(lang => `<option value="${lang.value}">${lang.text}</option>`).join('');
-             await populateVoiceList();
-        }
-        
-        function populateVoiceList() {
-            return new Promise(resolve => {
-                setTimeout(() => {
-                    const selectedLang = ui.languageSelect.value;
-                    availableVoices = speechSynthesis.getVoices().filter(voice => voice.lang === selectedLang);
-                    
-                    ui.voiceSelect.innerHTML = '';
-                    if (availableVoices.length === 0) {
-                        ui.voiceSelect.innerHTML = '<option>Không có giọng đọc</option>';
-                    } else {
-                        availableVoices.forEach(voice => {
-                            const option = document.createElement('option');
-                            option.textContent = voice.name;
-                            option.setAttribute('data-name', voice.name);
-                            ui.voiceSelect.appendChild(option);
-                        });
-                    }
-                    resolve();
-                }, 100);
-            });
+             const bubble = messageWrapper.querySelector('.text-content');
+             if (bubble) {
+                bubble.textContent = newText;
+                if (!isInterim) {
+                    bubble.classList.remove('opacity-70');
+                    // *** THAY ĐỔI: Hiển thị nút loa khi có text cuối cùng ***
+                    const speakButton = messageWrapper.querySelector('.speak-btn');
+                    if (speakButton && newText) speakButton.classList.remove('hidden');
+                }
+             }
         }
         
         async function callGeminiAPI(prompt) {
-            ui.recordButton.disabled = true;
-            ui.statusDisplay.textContent = 'AI đang xử lý...';
+            if (!prompt.trim()) {
+                startListening();
+                return;
+            };
+            state.isProcessing = true;
+            updateStatus('AI đang xử lý...', 'processing');
             const thinkingMessageId = addMessageToLog('', 'ai');
 
             try {
                 const result = await chatSession.sendMessage(prompt);
                 const text = result.response.text();
                 updateMessageInLog(thinkingMessageId, text);
-                speak(text); 
+                speak(text, startListening);
             } catch (error) {
                 console.error("Lỗi khi gọi Gemini API:", error);
                 updateMessageInLog(thinkingMessageId, "Đã xảy ra lỗi, vui lòng thử lại.");
+                startListening();
             } finally {
-                ui.recordButton.disabled = false;
-                ui.statusDisplay.textContent = 'Nhấn để nói';
+                state.isProcessing = false;
             }
         }
 
-        function speak(text) {
-            if (!('speechSynthesis' in window) || !text) return;
+        function speak(text, onEndCallback) {
+            if (!('speechSynthesis' in window) || !text) {
+                if (onEndCallback) onEndCallback();
+                return;
+            }
 
             const utterance = new SpeechSynthesisUtterance(text);
             const selectedVoiceName = ui.voiceSelect.selectedOptions[0]?.dataset.name;
@@ -292,11 +338,79 @@
             }
             utterance.lang = ui.languageSelect.value;
             utterance.rate = 1.0;
-
+            utterance.onstart = () => {
+                state.isSpeaking = true;
+                updateStatus('AI đang trả lời...', 'speaking');
+            }
+            utterance.onend = () => {
+                state.isSpeaking = false;
+                if (onEndCallback) onEndCallback();
+            };
+            utterance.onerror = () => {
+                state.isSpeaking = false;
+                if (onEndCallback) onEndCallback();
+            };
             window.speechSynthesis.cancel();
             window.speechSynthesis.speak(utterance);
         }
 
+        function updateStatus(text, statusType) {
+            ui.statusDisplay.textContent = text;
+            const indicator = ui.statusIndicator;
+            const recordBtn = ui.recordIndicator;
+            
+            indicator.className = 'relative inline-flex rounded-full h-3 w-3';
+            recordBtn.classList.remove('listening', 'bg-red-500', 'bg-blue-600', 'bg-gray-400');
+
+            switch (statusType) {
+                case 'listening':
+                    indicator.classList.add('bg-blue-500');
+                    recordBtn.classList.add('bg-blue-600', 'listening');
+                    break;
+                case 'processing':
+                    indicator.classList.add('bg-yellow-500');
+                    recordBtn.classList.add('bg-red-500');
+                    break;
+                case 'speaking':
+                    indicator.classList.add('bg-green-500');
+                    recordBtn.classList.add('bg-blue-600');
+                    break;
+                case 'error':
+                    indicator.classList.add('bg-red-500');
+                    recordBtn.classList.add('bg-gray-400');
+                    break;
+                default: // idle
+                    indicator.classList.add('bg-gray-400');
+                    recordBtn.classList.add('bg-gray-400');
+            }
+        }
+        
+        async function populateLanguageOptions() {
+             const languages = [ { value: 'vi-VN', text: 'Tiếng Việt' }, { value: 'en-US', text: 'English (US)' }, { value: 'en-GB', text: 'English (UK)' }, { value: 'ja-JP', text: '日本語' }, { value: 'ko-KR', text: '한국어' }, ];
+             ui.languageSelect.innerHTML = languages.map(lang => `<option value="${lang.value}">${lang.text}</option>`).join('');
+             await populateVoiceList();
+        }
+        
+        function populateVoiceList() {
+            return new Promise(resolve => {
+                setTimeout(() => {
+                    const selectedLang = ui.languageSelect.value;
+                    availableVoices = speechSynthesis.getVoices().filter(voice => voice.lang.startsWith(selectedLang.split('-')[0]));
+                    ui.voiceSelect.innerHTML = '';
+                    if (availableVoices.length === 0) {
+                        ui.voiceSelect.innerHTML = '<option>Không có giọng đọc</option>';
+                    } else {
+                        availableVoices.forEach(voice => {
+                            const option = document.createElement('option');
+                            option.textContent = `${voice.name} (${voice.lang})`;
+                            option.setAttribute('data-name', voice.name);
+                            ui.voiceSelect.appendChild(option);
+                        });
+                    }
+                    resolve();
+                }, 150);
+            });
+        }
         main();
     </script>
 </body>
