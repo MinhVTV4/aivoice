@@ -59,8 +59,9 @@
     </div>
     
     <script type="module">
+        // *** SỬA LỖI: Thêm GoogleAIBackend vào import ***
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
-        import { getAI, getGenerativeModel } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-ai.js";
+        import { getAI, getGenerativeModel, GoogleAIBackend } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-ai.js";
 
         // --- DOM Elements & State ---
         const ui = {
@@ -96,7 +97,8 @@
         async function main() {
             try {
                 const app = initializeApp(firebaseConfig);
-                const ai = getAI(app);
+                // *** SỬA LỖI: Thêm backend vào khi khởi tạo getAI ***
+                const ai = getAI(app, { backend: new GoogleAIBackend() });
                 model = getGenerativeModel(ai, { model: "gemini-1.5-flash-latest" });
                 ui.newChatButton.addEventListener('click', startNewConversation);
                 if (SpeechRecognition) {
@@ -143,7 +145,7 @@
 
             recognition.onerror = (event) => {
                 console.error('Speech recognition error:', event.error);
-                if (event.error === 'no-speech') return; // Bỏ qua lỗi không có giọng nói
+                if (event.error === 'no-speech' || event.error === 'aborted') return; // Bỏ qua các lỗi thường gặp, không đáng kể
                 updateStatus(`Lỗi: ${event.error}`, 'error');
             };
 
@@ -169,11 +171,13 @@
                 }
 
                 state.speechEndTimeout = setTimeout(() => {
-                    recognition.stop();
-                    // Nếu có tin nhắn tạm, hoàn thành nó
-                    if (state.currentInterimMessageId) {
-                         const lastInterimBubble = document.getElementById(state.currentInterimMessageId).querySelector('.text-content');
-                         if(lastInterimBubble) handleFinalResult(lastInterimBubble.textContent);
+                    if (state.isListening) {
+                        recognition.stop();
+                        // Nếu có tin nhắn tạm, hoàn thành nó
+                        if (state.currentInterimMessageId) {
+                             const lastInterimBubble = document.getElementById(state.currentInterimMessageId)?.querySelector('.text-content');
+                             if(lastInterimBubble) handleFinalResult(lastInterimBubble.textContent);
+                        }
                     }
                 }, 1500); // 1.5 giây im lặng thì coi như kết thúc câu
             };
@@ -189,12 +193,12 @@
 
         function handleFinalResult(transcript) {
             clearTimeout(state.speechEndTimeout);
-            recognition.stop();
+            if (state.isListening) recognition.stop();
             
             if (state.currentInterimMessageId) {
                 updateMessageInLog(state.currentInterimMessageId, transcript, false);
                 state.currentInterimMessageId = null;
-            } else {
+            } else if (transcript.trim()){
                  addMessageToLog(transcript.trim(), 'user');
             }
             
@@ -206,12 +210,17 @@
         }
 
         function startListening() {
-            if (!state.isListening && recognition) {
-                try {
-                    recognition.start();
-                } catch(e){
-                    console.error("Could not start recognition:", e);
-                }
+            if (state.isListening || !recognition || state.isSpeaking || state.isProcessing) return;
+            try {
+                recognition.start();
+            } catch(e){
+                console.error("Could not start recognition:", e);
+                // Có thể recognition đã chạy, thử stop và start lại
+                setTimeout(() => {
+                    if (!state.isListening) {
+                        try { recognition.start(); } catch(err) {}
+                    }
+                }, 250);
             }
         }
 
@@ -222,10 +231,9 @@
             const pulse = ui.statusIndicator.querySelector('span:first-child');
             const recordBtn = ui.recordButton;
             
-            // Reset classes
             indicator.className = 'relative inline-flex rounded-full h-3 w-3';
             pulse.className = 'animate-ping absolute inline-flex h-full w-full rounded-full opacity-75';
-            recordBtn.classList.remove('listening-pulse', 'bg-red-500', 'bg-blue-600');
+            recordBtn.classList.remove('listening-pulse', 'bg-red-500', 'bg-blue-600', 'bg-gray-400');
 
             switch (statusType) {
                 case 'listening':
@@ -292,7 +300,7 @@
              if (bubble) {
                 bubble.textContent = newText;
                 if(isInterim){
-                    bubble.classList.add('opacity-70');
+                    if(!bubble.classList.contains('opacity-70')) bubble.classList.add('opacity-70');
                 } else {
                     bubble.classList.remove('opacity-70');
                 }
@@ -304,24 +312,30 @@
             updateStatus('AI đang xử lý...', 'processing');
 
             const aiMessageId = addMessageToLog('', 'ai', true);
-            const textBubble = document.getElementById(aiMessageId).querySelector('.text-content');
+            const textBubble = document.getElementById(aiMessageId)?.querySelector('.text-content');
+            if(!textBubble) return; // Thoát nếu không tìm thấy bubble
+            
             let fullResponse = "";
 
             try {
-                const stream = await chatSession.generateContentStream(prompt);
-                for await (const chunk of stream) {
+                const result = await chatSession.generateContent({
+                    contents: [{role: "user", parts:[{text: prompt}]}]
+                }, { stream: true });
+
+                for await (const chunk of result.stream) {
                     const chunkText = chunk.text();
                     fullResponse += chunkText;
                     textBubble.textContent = fullResponse;
-                    ui.chatLog.scrollTop = ui.chatLog.scrollHeight; // Cuộn xuống khi có text mới
+                    ui.chatLog.scrollTop = ui.chatLog.scrollHeight;
                 }
             } catch (error) {
                 console.error("Lỗi khi gọi Gemini API:", error);
                 textBubble.textContent = "Đã xảy ra lỗi, vui lòng thử lại.";
+                fullResponse = ""; // Đảm bảo không đọc lỗi
             } finally {
                 state.isProcessing = false;
                 if(fullResponse) speak(fullResponse);
-                else startListening(); // Nếu không có phản hồi, nghe tiếp
+                else startListening();
             }
         }
 
@@ -339,13 +353,13 @@
 
             utterance.onend = () => {
                 state.isSpeaking = false;
-                startListening(); // Tự động nghe lại sau khi nói xong
+                startListening();
             };
             
             utterance.onerror = (e) => {
                 console.error("Lỗi phát âm thanh:", e);
                 state.isSpeaking = false;
-                startListening(); // Nếu lỗi cũng nghe lại
+                startListening();
             }
 
             window.speechSynthesis.speak(utterance);
